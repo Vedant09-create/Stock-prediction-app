@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Prediction App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        .container { max-width: 1200px; margin-top: 30px; }
+        .chart-container { margin-top: 20px; min-height: 400px; }
+        .trade-form { margin-top: 20px; }
+        .alert { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">Stock Prediction App</h1>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Stock Search</h5>
+                        <form id="stockForm">
+                            <div class="mb-3">
+                                <label for="symbol" class="form-label">Stock Symbol</label>
+                                <input type="text" class="form-control" id="symbol" placeholder="e.g., IBM" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="window" class="form-label">Moving Average Window</label>
+                                <input type="number" class="form-control" id="window" value="20" min="1" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Analyze</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <h5 class="card-title">Trading</h5>
+                        <form id="tradeForm">
+                            <div class="mb-3">
+                                <label for="tradeSymbol" class="form-label">Stock Symbol</label>
+                                <input type="text" class="form-control" id="tradeSymbol" placeholder="e.g., IBM" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="quantity" class="form-label">Quantity</label>
+                                <input type="number" class="form-control" id="quantity" min="1" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="action" class="form-label">Action</label>
+                                <select class="form-control" id="action" required>
+                                    <option value="buy">Buy</option>
+                                    <option value="sell">Sell</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-success">Execute Trade</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Stock Analysis</h5>
+                        <div id="stockChart" class="chart-container"></div>
+                        <div id="volatilityInfo" class="mt-3"></div>
+                        <div id="errorMessage" class="alert alert-danger" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        document.getElementById('stockForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const symbol = document.getElementById('symbol').value.toUpperCase();
+            const window = document.getElementById('window').value;
+
+            try {
+                // Show loading state
+                document.getElementById('stockChart').innerHTML = 'Loading...';
+                document.getElementById('volatilityInfo').innerHTML = '';
+                document.getElementById('errorMessage').style.display = 'none';
+
+                // Fetch moving average data
+                const maResponse = await fetch(`/api/moving-average?symbol=${symbol}&window=${window}`);
+                const maData = await maResponse.json();
+
+                if (maResponse.status !== 200) {
+                    throw new Error(maData.error || 'Failed to fetch stock data');
+                }
+
+                // Prepare data for plotting
+                const dates = Object.keys(maData.Close);
+                const prices = Object.values(maData.Close);
+                const ma = Object.values(maData.Moving_Average);
+
+                const trace1 = {
+                    x: dates,
+                    y: prices,
+                    type: 'scatter',
+                    name: 'Stock Price',
+                    line: { color: '#17BECF' }
+                };
+
+                const trace2 = {
+                    x: dates,
+                    y: ma,
+                    type: 'scatter',
+                    name: 'Moving Average',
+                    line: { color: '#7F7F7F' }
+                };
+
+                const layout = {
+                    title: `${symbol} Stock Analysis`,
+                    xaxis: { 
+                        title: 'Date',
+                        rangeslider: { visible: true }
+                    },
+                    yaxis: { title: 'Price ($)' },
+                    showlegend: true,
+                    legend: {
+                        x: 0,
+                        y: 1
+                    }
+                };
+
+                Plotly.newPlot('stockChart', [trace1, trace2], layout);
+
+                // Fetch volatility data
+                const volResponse = await fetch(`/api/volatility?symbol=${symbol}`);
+                const volData = await volResponse.json();
+
+                if (volResponse.status === 200) {
+                    document.getElementById('volatilityInfo').innerHTML = `
+                        <div class="alert alert-info">
+                            <strong>Volatility:</strong> ${(volData.volatility * 100).toFixed(2)}%<br>
+                            <strong>95% Confidence Interval:</strong> ${(volData.confidence_interval[0] * 100).toFixed(2)}% to ${(volData.confidence_interval[1] * 100).toFixed(2)}%
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showError(error.message || 'Error fetching stock data');
+                document.getElementById('stockChart').innerHTML = '';
+                document.getElementById('volatilityInfo').innerHTML = '';
+            }
+        });
+
+        document.getElementById('tradeForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const data = {
+                symbol: document.getElementById('tradeSymbol').value.toUpperCase(),
+                quantity: document.getElementById('quantity').value,
+                action: document.getElementById('action').value
+            };
+
+            try {
+                const response = await fetch('/api/trade', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (response.status !== 200) {
+                    throw new Error(result.error || 'Failed to execute trade');
+                }
+
+                alert(`Trade executed successfully!\n\nDetails:\n` +
+                      `Symbol: ${result.details.symbol}\n` +
+                      `Action: ${result.details.action}\n` +
+                      `Quantity: ${result.details.quantity}\n` +
+                      `Price per share: $${result.details.price_per_share.toFixed(2)}\n` +
+                      `Total value: $${result.details.total_value.toFixed(2)}`);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                showError(error.message || 'Error executing trade');
+            }
+        });
+    </script>
+</body>
+</html>
